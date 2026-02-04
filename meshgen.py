@@ -2,8 +2,8 @@
 """Boilerplate generator for a multi-block backward-facing step UGRID file.
 
 Reads a JSON input file, performs basic math to compute node coordinates with
-geometric growth spacing in x and y, and writes a simple UGRID-like text file
-with nodes and hex connectivity.
+geometric growth spacing in x and y, and writes an ASCII UGRID file containing
+boundary quads and hexahedral volume elements.
 """
 
 from __future__ import annotations
@@ -32,6 +32,8 @@ class MeshConfig:
 class UGrid:
     nodes: List[Tuple[float, float, float]]
     cells: List[Tuple[int, int, int, int, int, int, int, int]]
+    boundary_quads: List[Tuple[int, int, int, int]]
+    boundary_ids: List[int]
 
 
 def load_config(path: Path) -> MeshConfig:
@@ -127,9 +129,7 @@ def symmetric_spacing(dx0: float, half_length: float, half_count: int, label: st
     return half_spacing + list(reversed(half_spacing))
 
 
-def build_blocks(config: MeshConfig) -> Tuple[UGrid, List[str]]:
-    messages: List[str] = []
-
+def build_blocks(config: MeshConfig) -> UGrid:
     x_step_spacing = build_spacing(
         config.dx_corner, config.step_length, config.nx_step, "step x"
     )
@@ -194,17 +194,69 @@ def build_blocks(config: MeshConfig) -> Tuple[UGrid, List[str]]:
     add_block(x_step_coords, y_upper, z_coords)
     add_block(x_step_coords, y_lower, z_coords)
 
-    return UGrid(nodes=nodes, cells=cells), messages
+    boundary_quads, boundary_ids = extract_boundary_quads(cells)
+    return UGrid(
+        nodes=nodes,
+        cells=cells,
+        boundary_quads=boundary_quads,
+        boundary_ids=boundary_ids,
+    )
+
+
+def extract_boundary_quads(
+    cells: List[Tuple[int, int, int, int, int, int, int, int]]
+) -> Tuple[List[Tuple[int, int, int, int]], List[int]]:
+    face_map: Dict[Tuple[int, int, int, int], Tuple[int, int, int, int]] = {}
+    face_counts: Dict[Tuple[int, int, int, int], int] = {}
+
+    face_indices = [
+        (0, 1, 2, 3),
+        (4, 5, 6, 7),
+        (0, 1, 5, 4),
+        (1, 2, 6, 5),
+        (2, 3, 7, 6),
+        (3, 0, 4, 7),
+    ]
+
+    for cell in cells:
+        for indices in face_indices:
+            face = tuple(cell[i] for i in indices)
+            face_key = tuple(sorted(face))
+            face_map[face_key] = face
+            face_counts[face_key] = face_counts.get(face_key, 0) + 1
+
+    boundary_quads: List[Tuple[int, int, int, int]] = []
+    boundary_ids: List[int] = []
+    for face_key, count in face_counts.items():
+        if count == 1:
+            boundary_quads.append(face_map[face_key])
+            boundary_ids.append(1)
+
+    return boundary_quads, boundary_ids
 
 
 def iter_ugrid_lines(ugrid: UGrid) -> Iterable[str]:
-    yield "# UGRID boilerplate (nodes and hex cells)\n"
-    yield f"NODES {len(ugrid.nodes)}\n"
+    number_of_nodes = len(ugrid.nodes)
+    number_of_surf_trias = 0
+    number_of_surf_quads = len(ugrid.boundary_quads)
+    number_of_vol_tets = 0
+    number_of_vol_pents_5 = 0
+    number_of_vol_pents_6 = 0
+    number_of_vol_hexs = len(ugrid.cells)
+
+    yield (
+        f"{number_of_nodes} {number_of_surf_trias} {number_of_surf_quads} "
+        f"{number_of_vol_tets} {number_of_vol_pents_5} {number_of_vol_pents_6} "
+        f"{number_of_vol_hexs}\n"
+    )
     for x, y, z in ugrid.nodes:
         yield f"{x:.6f} {y:.6f} {z:.6f}\n"
-    yield f"CELLS {len(ugrid.cells)}\n"
+    for quad in ugrid.boundary_quads:
+        yield " ".join(str(idx + 1) for idx in quad) + "\n"
+    for surface_id in ugrid.boundary_ids:
+        yield f"{surface_id}\n"
     for cell in ugrid.cells:
-        yield " ".join(str(idx) for idx in cell) + "\n"
+        yield " ".join(str(idx + 1) for idx in cell) + "\n"
 
 
 def write_ugrid(path: Path, ugrid: UGrid) -> None:
@@ -224,7 +276,7 @@ def parse_args() -> argparse.Namespace:
 def main() -> None:
     args = parse_args()
     config = load_config(args.input)
-    ugrid, _ = build_blocks(config)
+    ugrid = build_blocks(config)
     write_ugrid(args.output, ugrid)
 
 
