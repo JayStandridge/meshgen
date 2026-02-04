@@ -2,7 +2,8 @@
 
 This repository contains a Python script that reads a JSON mesh configuration,
 performs basic coordinate math for a multi-block backward-facing step, and
-writes a simple UGRID-like text file containing nodes and hex connectivity.
+writes an ASCII UGRID file containing boundary quads and hexahedral volume
+elements.
 
 The mesh is constructed from three structured blocks:
 
@@ -23,12 +24,13 @@ The input JSON file must include:
 - `landing_length`: length of the inlet block upstream of the step
 - `nx_landing`: number of cells in the inlet block (x direction)
 - `dx_corner`: starting spacing at the step corner (x/y directions)
-- `step_height`: height of the step (also used for the upper channel height)
+- `step_height`: height of the step (lower channel height below the corner, growth from bottom wall toward the step)
+- `upper_height`: height of the upper channel above the step corner (growth from top wall toward the step)
 - `ny_step`: number of cells across the step height
 - `delta_z`: uniform spacing in the z direction
 - `nz`: number of cells in the z direction
 - `step_length`: length of the downstream blocks
-- `nx_step`: number of cells in the downstream blocks (x direction)
+- `nx_step`: number of cells in the downstream blocks (x direction, must be even)
 
 Example:
 
@@ -38,6 +40,7 @@ Example:
   "nx_landing": 6,
   "dx_corner": 0.05,
   "step_height": 1.0,
+  "upper_height": 1.0,
   "ny_step": 10,
   "delta_z": 0.1,
   "nz": 5,
@@ -48,6 +51,10 @@ Example:
 
 ## Output format
 
-The output is a simple text representation of a UGRID-like file with node
-coordinates followed by hex cell connectivity. This is intended as a
-boilerplate starting point for integrating with real UGRID/NetCDF workflows.
+The output is an ASCII UGRID file with the standard header counts followed by
+node coordinates, boundary quadrilateral faces, boundary surface IDs, and
+hexahedral volume elements (with 1-based node indexing). A companion
+`.mapbc` file is written alongside the UGRID file, mapping each boundary quad
+to a boundary condition ID: inlet (1), outlet (2), bottom wall (3), top far
+field (4), and symmetry sides in z (5). This is intended as a boilerplate
+starting point for integrating with real UGRID/NetCDF workflows.

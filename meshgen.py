@@ -21,6 +21,7 @@ class MeshConfig:
     nx_landing: int
     dx_corner: float
     step_height: float
+    upper_height: float
     ny_step: int
     delta_z: float
     nz: int
@@ -45,6 +46,7 @@ def load_config(path: Path) -> MeshConfig:
         "nx_landing",
         "dx_corner",
         "step_height",
+        "upper_height",
         "ny_step",
         "delta_z",
         "nz",
@@ -61,6 +63,7 @@ def load_config(path: Path) -> MeshConfig:
         nx_landing=int(data["nx_landing"]),
         dx_corner=float(data["dx_corner"]),
         step_height=float(data["step_height"]),
+        upper_height=float(data["upper_height"]),
         ny_step=int(data["ny_step"]),
         delta_z=float(data["delta_z"]),
         nz=int(data["nz"]),
@@ -124,14 +127,29 @@ def cumulative_coords(start: float, spacings: List[float]) -> List[float]:
     return coords
 
 
-def symmetric_spacing(dx0: float, half_length: float, half_count: int, label: str) -> List[float]:
+def symmetric_spacing(dx0: float, length: float, count: int, label: str) -> List[float]:
+    if count % 2 != 0:
+        raise ValueError(f"{label} count must be even for symmetric spacing.")
+    half_count = count // 2
+    half_length = length / 2.0
     half_spacing = build_spacing(dx0, half_length, half_count, label)
     return half_spacing + list(reversed(half_spacing))
 
 
+def wall_to_center_coords(
+    height: float, count: int, dx0: float, label: str, wall_at_positive: bool
+) -> List[float]:
+    spacing = build_spacing(dx0, height, count, label)
+    coords_from_wall = cumulative_coords(0.0, spacing)
+    if wall_at_positive:
+        coords = [height - s for s in coords_from_wall]
+        return list(reversed(coords))
+    return [-height + s for s in coords_from_wall]
+
+
 def build_blocks(config: MeshConfig) -> UGrid:
-    x_step_spacing = build_spacing(
-        config.dx_corner, config.step_length, config.nx_step, "step x"
+    x_step_spacing = symmetric_spacing(
+        config.dx_corner, config.step_length, config.nx_step, "step x (symmetric)"
     )
     x_step_coords = cumulative_coords(0.0, x_step_spacing)
 
@@ -143,13 +161,20 @@ def build_blocks(config: MeshConfig) -> UGrid:
         x_landing_coords.append(x_landing_coords[-1] - delta)
     x_landing_coords.reverse()
 
-    y_spacing_full = symmetric_spacing(
-        config.dx_corner, config.step_height, config.ny_step, "step y (symmetric)"
+    y_upper = wall_to_center_coords(
+        config.upper_height,
+        config.ny_step,
+        config.dx_corner,
+        "upper y (wall to center)",
+        wall_at_positive=True,
     )
-    y_coords_full = cumulative_coords(0.0, y_spacing_full)
-    y_mid_index = config.ny_step
-    y_lower = y_coords_full[: y_mid_index + 1]
-    y_upper = y_coords_full[y_mid_index:]
+    y_lower = wall_to_center_coords(
+        config.step_height,
+        config.ny_step,
+        config.dx_corner,
+        "lower y (wall to center)",
+        wall_at_positive=False,
+    )
 
     z_spacing = [config.delta_z for _ in range(config.nz)]
     z_coords = cumulative_coords(0.0, z_spacing)
@@ -194,7 +219,7 @@ def build_blocks(config: MeshConfig) -> UGrid:
     add_block(x_step_coords, y_upper, z_coords)
     add_block(x_step_coords, y_lower, z_coords)
 
-    boundary_quads, boundary_ids = extract_boundary_quads(cells)
+    boundary_quads, boundary_ids = extract_boundary_quads(nodes, cells)
     return UGrid(
         nodes=nodes,
         cells=cells,
@@ -204,6 +229,7 @@ def build_blocks(config: MeshConfig) -> UGrid:
 
 
 def extract_boundary_quads(
+    nodes: List[Tuple[float, float, float]],
     cells: List[Tuple[int, int, int, int, int, int, int, int]]
 ) -> Tuple[List[Tuple[int, int, int, int]], List[int]]:
     face_map: Dict[Tuple[int, int, int, int], Tuple[int, int, int, int]] = {}
@@ -225,12 +251,40 @@ def extract_boundary_quads(
             face_map[face_key] = face
             face_counts[face_key] = face_counts.get(face_key, 0) + 1
 
+    min_x = min(coord[0] for coord in nodes)
+    max_x = max(coord[0] for coord in nodes)
+    min_y = min(coord[1] for coord in nodes)
+    max_y = max(coord[1] for coord in nodes)
+    min_z = min(coord[2] for coord in nodes)
+    max_z = max(coord[2] for coord in nodes)
+
+    tolerance = 1e-9
+
+    def classify_face(face: Tuple[int, int, int, int]) -> int:
+        xs = [nodes[idx][0] for idx in face]
+        ys = [nodes[idx][1] for idx in face]
+        zs = [nodes[idx][2] for idx in face]
+        if all(abs(x - min_x) < tolerance for x in xs):
+            return 1  # inlet
+        if all(abs(x - max_x) < tolerance for x in xs):
+            return 2  # outlet
+        if all(abs(y - min_y) < tolerance for y in ys):
+            return 3  # bottom wall
+        if all(abs(y - max_y) < tolerance for y in ys):
+            return 4  # top far field
+        if all(abs(z - min_z) < tolerance for z in zs) or all(
+            abs(z - max_z) < tolerance for z in zs
+        ):
+            return 5  # symmetry sides
+        return 0
+
     boundary_quads: List[Tuple[int, int, int, int]] = []
     boundary_ids: List[int] = []
     for face_key, count in face_counts.items():
         if count == 1:
-            boundary_quads.append(face_map[face_key])
-            boundary_ids.append(1)
+            face = face_map[face_key]
+            boundary_quads.append(face)
+            boundary_ids.append(classify_face(face))
 
     return boundary_quads, boundary_ids
 
@@ -264,6 +318,12 @@ def write_ugrid(path: Path, ugrid: UGrid) -> None:
         handle.writelines(iter_ugrid_lines(ugrid))
 
 
+def write_mapbc(path: Path, boundary_ids: List[int]) -> None:
+    with path.open("w", encoding="utf-8") as handle:
+        for surface_id in boundary_ids:
+            handle.write(f"{surface_id}\n")
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="Generate a multi-block backward-facing step UGRID file."
@@ -278,6 +338,8 @@ def main() -> None:
     config = load_config(args.input)
     ugrid = build_blocks(config)
     write_ugrid(args.output, ugrid)
+    mapbc_path = args.output.with_suffix(args.output.suffix + ".mapbc")
+    write_mapbc(mapbc_path, ugrid.boundary_ids)
 
 
 if __name__ == "__main__":
