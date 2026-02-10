@@ -1,0 +1,14 @@
+{
+  "shaft_radius": 1.0,
+  "nx_landing": 20,
+  "x_landing": 1.0,
+  "x_seal": 2.0,
+  "nx_seal": 30,
+  "x1": 0.01,
+  "y_clearance": 0.1,
+  "ny_clearance": 16,
+  "r_stator": 1.6,
+  "ny_landing": 18,
+  "y1": 0.005,
+  "n_theta": 24
+}
