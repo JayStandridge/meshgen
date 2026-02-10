@@ -22,6 +22,7 @@ class MeshConfig:
     dx_corner: float
     step_height: float
     upper_height: float
+    ny_upper: int
     ny_step: int
     delta_z: float
     nz: int
@@ -47,6 +48,7 @@ def load_config(path: Path) -> MeshConfig:
         "dx_corner",
         "step_height",
         "upper_height",
+        "ny_upper",
         "ny_step",
         "delta_z",
         "nz",
@@ -64,6 +66,7 @@ def load_config(path: Path) -> MeshConfig:
         dx_corner=float(data["dx_corner"]),
         step_height=float(data["step_height"]),
         upper_height=float(data["upper_height"]),
+        ny_upper=int(data["ny_upper"]),
         ny_step=int(data["ny_step"]),
         delta_z=float(data["delta_z"]),
         nz=int(data["nz"]),
@@ -89,13 +92,13 @@ def solve_growth_ratio(dx0: float, length: float, count: int) -> float:
         return 1.0
 
     min_length = dx0
-    max_length = geometric_series_length(dx0, 10.0, count)
+    max_length = geometric_series_length(dx0, 1.3, count)
     if not (min_length <= length <= max_length):
         raise ValueError(
             f"Requested length {length} is out of bounds for dx0={dx0} and count={count}."
         )
 
-    low, high = 1e-6, 10.0
+    low, high = 1e-6, 1.3
     for _ in range(80):
         mid = 0.5 * (low + high)
         current = geometric_series_length(dx0, mid, count)
@@ -148,11 +151,16 @@ def wall_to_center_coords(
 
 
 def build_blocks(config: MeshConfig) -> UGrid:
-    x_step_spacing = symmetric_spacing(
-        config.dx_corner, config.step_length, config.nx_step, "step x (symmetric)"
-    )
-    x_step_coords = cumulative_coords(0.0, x_step_spacing)
 
+    x_step_coords = wall_to_center_coords(
+        config.step_length,
+        config.nx_step,
+        config.dx_corner,
+        "step x (wall to outlet)",
+        wall_at_positive=False,
+    )
+    x_step_coords=[config.step_length+i for i in x_step_coords]
+    #print(x_step_coords)
     x_landing_spacing = build_spacing(
         config.dx_corner, config.landing_length, config.nx_landing, "landing x"
     )
@@ -160,22 +168,23 @@ def build_blocks(config: MeshConfig) -> UGrid:
     for delta in x_landing_spacing:
         x_landing_coords.append(x_landing_coords[-1] - delta)
     x_landing_coords.reverse()
-
+    #print(x_landing_coords)
     y_upper = wall_to_center_coords(
         config.upper_height,
-        config.ny_step,
+        config.ny_upper,
         config.dx_corner,
         "upper y (wall to center)",
         wall_at_positive=True,
     )
-    y_lower = wall_to_center_coords(
-        config.step_height,
-        config.ny_step,
-        config.dx_corner,
-        "lower y (wall to center)",
-        wall_at_positive=False,
-    )
+    y_upper = [config.upper_height-i for i in y_upper]
+    
+    
 
+    y_step_spacing = symmetric_spacing(config.dx_corner, config.step_height, config.ny_step, "step y (symmetric)")
+    y_lower = cumulative_coords(0.0,y_step_spacing)
+    y_lower = [-i for i in y_lower]
+    #print(y_lower)
+    #print(y_upper)
     z_spacing = [config.delta_z for _ in range(config.nz)]
     z_coords = cumulative_coords(0.0, z_spacing)
 
@@ -276,7 +285,7 @@ def extract_boundary_quads(
             abs(z - max_z) < tolerance for z in zs
         ):
             return 5  # symmetry sides
-        return 0
+        return 3
 
     boundary_quads: List[Tuple[int, int, int, int]] = []
     boundary_ids: List[int] = []
