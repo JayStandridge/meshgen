@@ -79,6 +79,8 @@ def load_config(path: Path) -> MeshConfig:
         step_length=float(data["step_length"]),
         nx_step=int(data["nx_step"]),
     )
+    if config.ny_step % 2 != 0:
+        raise ValueError("ny_step must be even so step-block y spacing can meet at the center.")
     return config
 
 
@@ -158,8 +160,8 @@ def wall_to_center_coords(
 
 
 def build_blocks(config: MeshConfig) -> UGrid:
-    x_step_spacing = symmetric_spacing(
-        config.x1, config.step_length, config.nx_step, "step x (symmetric)"
+    x_step_spacing = build_spacing(
+        config.x1, config.step_length, config.nx_step, "step x (grow to outlet)"
     )
     x_step_coords = cumulative_coords(0.0, x_step_spacing)
 
@@ -178,13 +180,10 @@ def build_blocks(config: MeshConfig) -> UGrid:
         "upper y (wall to center)",
         wall_at_positive=True,
     )
-    y_lower = wall_to_center_coords(
-        config.step_height,
-        config.ny_step,
-        config.y1,
-        "lower y (wall to center)",
-        wall_at_positive=False,
+    y_step_spacing = symmetric_spacing(
+        config.y1, config.step_height, config.ny_step, "step y (symmetric walls)"
     )
+    y_lower = cumulative_coords(-config.step_height, y_step_spacing)
 
     z_spacing = [config.delta_z for _ in range(config.nz)]
     z_coords = cumulative_coords(0.0, z_spacing)

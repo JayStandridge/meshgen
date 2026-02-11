@@ -17,7 +17,7 @@ BFS input parameters:
 - `y1` (first y-cell at walls)
 - `step_height`
 - `upper_height`
-- `ny_step`
+- `ny_step` (even; lower step block spacing meets at center y)
 - `delta_z`
 - `nz`
 - `step_length`
@@ -25,9 +25,9 @@ BFS input parameters:
 
 BFS spacing behavior:
 - Landing x-spacing shrinks toward the step corner (`x=0`) with first size `x1`.
-- Step-block x-spacing is symmetric in x about the midpoint of the step block.
-- Upper block y-spacing uses `y1` at the top wall and grows toward centerline `y=0`.
-- Lower step block y-spacing uses `y1` at the bottom wall and grows toward the step corner (`y=0`).
+- Step-block x-spacing starts at `x1` and grows toward the outlet.
+- Upper block y-spacing uses `y1` at the wall and grows toward `y=upper_height`.
+- Lower step block y-spacing is reflected with `y1` at both walls (`y=-step_height` and `y=0`), meeting in the middle.
 
 ## 2) Flat plate (FP)
 
